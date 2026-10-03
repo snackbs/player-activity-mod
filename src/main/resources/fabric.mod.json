@@ -1,0 +1,20 @@
+{
+	"schemaVersion": 1,
+	"id": "player-activity",
+	"version": "${version}",
+	"name": "Player Activity Tracker",
+	"description": "记录每天上线的玩家、在线时长与来源 IP：OP 可用 /pactivity 指令查询，数据按天保存在服务端 player-activity 文件夹。",
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.example.playeractivity.PlayerActivityMod"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.3",
+		"minecraft": "~26.1",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

@@ -1,0 +1,6 @@
+# 强制 LF，避免 Linux CI 上 gradlew 因 CRLF 报 "bad interpreter"
+* text=auto
+gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.png binary

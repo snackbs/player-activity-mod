@@ -131,4 +131,4 @@ player-activity-mod/
 - 兼容版本声明为 `~26.1`（即 26.1 / 26.1.1 / 26.1.2）。若日后升级到 26.2+，需将 `gradle.properties` 中 `fabric_api_version` 换成对应版本，并把 `fabric.mod.json` 的 `minecraft` 依赖放宽（如 `">=26.1 <27"`）后重新构建；
 - 本模组不需要 Mixin，仅使用 Fabric API 稳定事件，升级成本很低。
 
-> AI生成
+> DeepSeek V4.1 Flash AI生成

@@ -1,5 +1,8 @@
 # Player Activity Tracker（玩家每日在线统计）
 
+[![Build](https://github.com/snackbs/player-activity-mod/actions/workflows/build.yml/badge.svg)](https://github.com/snackbs/player-activity-mod/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/snackbs/player-activity-mod)](https://github.com/snackbs/player-activity-mod/releases)
+
 适用于 **Minecraft Java Edition 26.1**（Tiny Takeover）的 Fabric 服务端模组。
 
 自动记录**每天有哪些玩家上线**、**每名玩家当日的在线时长**以及**玩家进服时的来源 IP**，数据按天保存为 JSON 文件，并可在游戏内用 OP 指令查询。

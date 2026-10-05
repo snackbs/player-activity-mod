@@ -46,6 +46,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      # body_path 需要仓库内容（RELEASE_NOTES.md）
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Download build artifacts
         uses: actions/download-artifact@v5
         with:
@@ -56,4 +60,6 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: build/libs/*.jar
+          # 更新日志正文来自 RELEASE_NOTES.md；generate_release_notes 作为兜底追加变更列表
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true

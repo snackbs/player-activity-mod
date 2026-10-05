@@ -7,6 +7,7 @@ import com.google.gson.GsonBuilder;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,9 +18,10 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -48,6 +50,14 @@ public final class ActivityManager {
 
     /** 数据目录：<服务端根目录>/player-activity/ */
     public static final Path DATA_DIR = FabricLoader.getInstance().getGameDir().resolve("player-activity");
+
+    /**
+     * 当前在线会话：玩家 UUID -> 本次上线时刻（epoch 秒）。
+     *
+     * <p>用来精确判断「某段时间里玩家是否真的在线」，以及跨越零点时
+     * 该玩家究竟是「延续在线」还是「当天新上线」。仅在主线程读写，无需加锁。
+     */
+    private static final Map<String, Long> SESSION_START = new HashMap<>();
 
     /** 内存缓存：日期 -> 当日记录（查询历史日期时也会缓存） */
     private static final Map<String, DailyRecord> CACHE = new HashMap<>();
@@ -82,6 +92,8 @@ public final class ActivityManager {
         DailyRecord record = todayRecord();
         String uuid = player.getUUID().toString();
         String time = LocalDateTime.now().format(TIME_FORMAT);
+        // 记录本次会话起点，供跨零点时区分「延续在线」与「当天新上线」
+        SESSION_START.put(uuid, Instant.now().getEpochSecond());
         PlayerEntry entry = record.players.computeIfAbsent(uuid, key -> new PlayerEntry());
         entry.uuid = uuid;
         entry.name = player.getGameProfile().name();
@@ -124,8 +136,10 @@ public final class ActivityManager {
 
     /** 玩家退出游戏。 */
     public static void onDisconnect(ServerPlayer player) {
+        String uuid = player.getUUID().toString();
+        SESSION_START.remove(uuid);
         DailyRecord record = todayRecord();
-        PlayerEntry entry = record.players.get(player.getUUID().toString());
+        PlayerEntry entry = record.players.get(uuid);
         if (entry != null) {
             entry.lastSeen = LocalDateTime.now().format(TIME_FORMAT);
             record.dirty = true;
@@ -135,7 +149,10 @@ public final class ActivityManager {
     /**
      * 按墙钟调用：为所有在线玩家累计 {@code seconds} 秒在线时长（由入口按真实时间节流，
      * 正常每次 1 秒，卡顿/休眠恢复时补偿累积值，单次上限见 MAX_CATCHUP_SECONDS）。
-     * 日期按服务器系统时间计算，跨零点的补偿会自动拆分到对应日期。
+     *
+     * <p>要计入的那段时间是「已经过去的区间」{@code [now - seconds, now]}。
+     * 区间按<b>自然日边界</b>切分：每一段写入该段所属日期的文件，
+     * 因此跨零点的补偿会精确拆分到两天——而不是像以前那样整段落到「当前」这一天。
      */
     public static void accrue(MinecraftServer server, long seconds) {
         if (seconds <= 0) {
@@ -145,42 +162,141 @@ public final class ActivityManager {
         if (players.isEmpty()) {
             return;
         }
-        LocalDateTime now = LocalDateTime.now();
-        String time = now.format(TIME_FORMAT);
-        long remain = seconds;
-        while (remain > 0) {
-            // 跨零点拆分：一次补偿多秒时不会整段记入同一天
-            long toMidnight = Duration.between(now, now.toLocalDate().plusDays(1).atStartOfDay()).getSeconds();
-            long chunk = Math.min(remain, Math.max(1L, toMidnight));
-            DailyRecord record = todayRecord();
+
+        ZoneId zone = ZoneId.systemDefault();
+        LocalDateTime end = LocalDateTime.now();
+        LocalDateTime cursor = end.minusSeconds(seconds);
+        while (cursor.isBefore(end)) {
+            LocalDate day = cursor.toLocalDate();
+            LocalDateTime dayStart = day.atStartOfDay();
+            LocalDateTime nextMidnight = dayStart.plusDays(1);
+            LocalDateTime segEnd = nextMidnight.isBefore(end) ? nextMidnight : end;
+
+            long segStartEpoch = cursor.atZone(zone).toEpochSecond();
+            long segEndEpoch = segEnd.atZone(zone).toEpochSecond();
+            long dayStartEpoch = dayStart.atZone(zone).toEpochSecond();
+            // 本段覆盖的最后一秒：段区间是左闭右开，若段终点正好是零点，
+            // 则本段最后一秒属于前一天（否则昨天的 lastSeen 会显示成 00:00:00）
+            LocalDateTime seenAt = segEnd.toLocalDate().atStartOfDay().equals(segEnd)
+                    ? segEnd.minusSeconds(1) : segEnd;
+            String lastSeenTime = seenAt.format(TIME_FORMAT);
+
+            DailyRecord record = recordFor(day.format(DATE_FORMAT));
+            boolean touched = false;
             for (ServerPlayer player : players) {
-                PlayerEntry entry = entryFor(record, player, time);
-                entry.onlineSeconds += chunk;
-                entry.lastSeen = time;
+                String uuid = player.getUUID().toString();
+                Long sessionStart = SESSION_START.get(uuid);
+                // 只累计「玩家确实在线」的那部分：会话开始晚于本段开头时从会话开始算
+                long from = sessionStart == null ? segStartEpoch : Math.max(segStartEpoch, sessionStart);
+                if (from >= segEndEpoch) {
+                    continue;
+                }
+                boolean continuation = isCarriedOver(sessionStart, dayStartEpoch);
+                PlayerEntry entry = entryFor(record, player, uuid, continuation, day, lastSeenTime);
+                entry.onlineSeconds += segEndEpoch - from;
+                entry.lastSeen = lastSeenTime;
+                touched = true;
             }
-            record.dirty = true;
-            remain -= chunk;
-            if (remain > 0) {
-                now = LocalDateTime.now();
-                time = now.format(TIME_FORMAT);
+            if (touched) {
+                record.dirty = true;
             }
+            cursor = segEnd;
         }
     }
 
-    /** 取（或兜底创建）玩家在某条记录中的条目。 */
-    private static PlayerEntry entryFor(DailyRecord record, ServerPlayer player, String time) {
-        String uuid = player.getUUID().toString();
+    /**
+     * 判断某玩家在 {@code day} 这一天是否属于「跨零点延续在线」（当天没有上线事件）。
+     *
+     * <p>依据本次会话起点：会话在当天 00:00:00 之前就已开始即为延续。
+     * 会话信息缺失（模组没看到该玩家的进服事件）时按「非延续」处理，
+     * 走 {@link #entryFor} 的兜底分支，避免把当天新上线的人误标成延续。
+     */
+    private static boolean isCarriedOver(Long sessionStart, long dayStartEpoch) {
+        return sessionStart != null && sessionStart < dayStartEpoch;
+    }
+
+    /**
+     * 取（或兜底创建）玩家在某条记录中的条目。
+     *
+     * @param continuation 该玩家是否属于「跨零点延续在线」：当天没有上线事件，
+     *                     新条目首登记为 00:00:00、上线次数不虚增，并打上延续标记与继承 IP
+     */
+    private static PlayerEntry entryFor(DailyRecord record, ServerPlayer player, String uuid,
+                                        boolean continuation, LocalDate day, String lastSeenTime) {
         PlayerEntry entry = record.players.get(uuid);
-        if (entry == null) {
-            // 兜底：例如模组在服务器运行途中才安装，玩家已在游戏里
-            entry = new PlayerEntry();
-            entry.uuid = uuid;
-            entry.name = player.getGameProfile().name();
-            entry.joinCount = 1;
-            entry.firstJoin = time;
-            record.players.put(uuid, entry);
+        if (entry != null) {
+            return entry;
         }
+        entry = new PlayerEntry();
+        entry.uuid = uuid;
+        entry.name = player.getGameProfile().name();
+        if (continuation) {
+            // 跨零点延续：玩家在零点前就已在线，本日并没有发生上线事件。
+            // 若这里再计一次 joinCount / 用「现在」当首登，就会造出一条 IP 缺失、
+            // 首登恰好卡在 00:00:00 的假记录，因此显式区分。
+            LocalDate from = carriedOverDate(uuid, day);
+            entry.joinCount = 0;
+            entry.firstJoin = "00:00:00";
+            entry.carriedOverFrom = from.format(DATE_FORMAT);
+            String ip = currentIp(player);
+            if (ip == null) {
+                // 实时地址取不到时，退回上一份记录里该玩家最后使用的 IP
+                ip = previousDayIp(from, uuid);
+            }
+            if (ip != null) {
+                recordIp(entry, ip, "00:00:00");
+            }
+            LOGGER.info("{} 跨零点延续在线（IP: {}，自 {} 起）", entry.name,
+                    ip == null ? "未取得" : ip, entry.carriedOverFrom);
+        } else {
+            // 兜底：例如模组在服务器运行途中才安装，玩家已在游戏里
+            entry.joinCount = 1;
+            entry.firstJoin = sessionTime(uuid, day, lastSeenTime);
+        }
+        record.players.put(uuid, entry);
         return entry;
+    }
+
+    /** 兜底条目的首登时间：优先用会话真实起点，取不到则退回本段结束时刻。 */
+    private static String sessionTime(String uuid, LocalDate day, String fallback) {
+        Long sessionStart = SESSION_START.get(uuid);
+        if (sessionStart == null) {
+            return fallback;
+        }
+        LocalDateTime started = LocalDateTime.ofInstant(Instant.ofEpochSecond(sessionStart),
+                ZoneId.systemDefault());
+        return started.toLocalDate().equals(day) ? started.format(TIME_FORMAT) : fallback;
+    }
+
+    /** 取玩家当前连接的对端 IP（无法识别时返回 null）。 */
+    private static String currentIp(ServerPlayer player) {
+        if (player == null) {
+            return null;
+        }
+        ServerGamePacketListenerImpl connection = player.connection;
+        return connection == null ? null : RemoteAddress.format(connection.getRemoteAddress());
+    }
+
+    /** 延续条目的起始日期：尽量用会话真实开始日，取不到时退化为前一天。 */
+    private static LocalDate carriedOverDate(String uuid, LocalDate day) {
+        Long sessionStart = SESSION_START.get(uuid);
+        if (sessionStart != null) {
+            return Instant.ofEpochSecond(sessionStart).atZone(ZoneId.systemDefault()).toLocalDate();
+        }
+        return day.minusDays(1);
+    }
+
+    /** 从某天的记录里取该玩家最后使用的 IP（延续条目兜底用，读取走缓存）。 */
+    private static String previousDayIp(LocalDate day, String uuid) {
+        if (day == null) {
+            return null;
+        }
+        DailyRecord previous = queryRecord(day.format(DATE_FORMAT)).orElse(null);
+        if (previous == null) {
+            return null;
+        }
+        PlayerEntry entry = previous.players.get(uuid);
+        return entry == null ? null : entry.lastIp;
     }
 
     /** 确保数据目录存在（服务器启动时调用）。 */
@@ -490,18 +606,27 @@ public final class ActivityManager {
 
     /** 获取今天的记录：优先取缓存，其次读当天文件（保证服务器重启后数据连续），否则新建。 */
     private static DailyRecord todayRecord() {
-        String today = LocalDate.now().format(DATE_FORMAT);
-        DailyRecord record = CACHE.get(today);
+        return recordFor(LocalDate.now().format(DATE_FORMAT));
+    }
+
+    /**
+     * 获取指定日期（yyyy-MM-dd）的记录：优先取缓存，其次读该日期文件，否则新建。
+     *
+     * <p>与 {@link #queryRecord(String)} 的区别是会为空记录创建条目，
+     * 供写入路径（跨零点切分时会写「昨天」那一份）使用。
+     */
+    private static DailyRecord recordFor(String date) {
+        DailyRecord record = CACHE.get(date);
         if (record != null) {
             return record;
         }
-        record = load(today);
+        record = load(date);
         if (record == null) {
             record = new DailyRecord();
-            record.date = today;
+            record.date = date;
             record.players = new LinkedHashMap<>();
         }
-        putCache(today, record);
+        putCache(date, record);
         return record;
     }
 

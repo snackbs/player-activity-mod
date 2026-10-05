@@ -13,10 +13,11 @@
   - 玩家名 + UUID（玩家改名后自动更新为最新名字）
   - 当日累计在线时长（精确到秒）
   - 当日上线次数、首次上线时间、最后在线时间
+  - **跨零点延续标记**：玩家在 00:00:00 前就已在线且一直没掉线时，当天条目会标记 `carriedOverFrom`（开始延续的日期），首登显示为 `00:00:00`、上线次数不虚增，并自动继承该玩家当前连接 IP
   - **来源 IP 地址**：玩家每次进服时记录其连接 IP（去端口、IPv4 映射地址还原为 IPv4、去掉 IPv6 区域后缀），同一玩家当天同一 IP 只记一条并累加上线次数
 - 数据保存：`<服务端目录>/player-activity/yyyy-MM-dd.json`，每天一个文件（UTF-8、带缩进、可直接阅读或二次处理）
 - 服务器**重启不丢数据**：启动后自动读取当天已有文件继续累计
-- **跨零点自动拆分**：玩家跨天在线时，时长自动分别计入对应日期
+- **跨零点自动拆分**：玩家跨天在线时，时长按自然日边界精确拆分，分别计入对应日期（例如 23:59:50～00:00:30 计入前一天 10 秒、当天 30 秒）
 - 防崩溃：先写临时文件再原子替换；运行期间每分钟自动落盘一次，关闭服务器时强制落盘（玩家进出服只标记脏数据、随该批次统一写入，不在主线程逐次写盘）
 - 玩家进服时在服务端日志打印一行 `玩家名 进入游戏（IP: x.x.x.x，本日第 N 次上线）`，同时写入当天 JSON
 - 隐私提示：IP 属于个人信息，数据文件保存在服务端本地，请自行确认是否告知玩家并注意文件访问权限（指令查看 IP 均需 OP）
@@ -54,7 +55,7 @@
 1. 服务端为 **Minecraft 26.1 + Fabric Loader 0.19.3+**（`fabric.mod.json` 声明 `>=0.19.3`，更高版本如 0.19.4/0.19.5 同样兼容；26.1 要求 **Java 25** 运行环境）；
 2. `mods` 文件夹内放入：
    - `fabric-api-0.155.3+26.1.2.jar`（Fabric API，26.1/26.1.1/26.1.2 通用）
-   - `player-activity-1.1.0.jar`（本模组，见 `build/libs/` 或随附构建产物）
+   - `player-activity-1.1.1.jar`（本模组，见 `build/libs/` 或随附构建产物）
 3. 重启服务器。首次有玩家上线后，服务端根目录会出现 `player-activity` 文件夹。
 
 ## 数据文件示例
@@ -93,7 +94,38 @@
 }
 ```
 
-> 旧版本留下的数据文件里没有 `lastIp` / `ips` 字段，模组会自动兼容（视为该玩家当天没有 IP 记录），无需手工修改。
+> 旧版本留下的数据文件里没有 `lastIp` / `ips` / `carriedOverFrom` 字段，模组会自动兼容（`ips` 视为空、`carriedOverFrom` 视为「非延续」），无需手工修改。
+
+玩家一直在线跨过零点时，新一天文件里会出现一个「延续条目」，例如：
+
+```json
+{
+  "date": "2026-10-03",
+  "players": {
+    "069a79f4-44e9-4726-a5be-fca90e38aaf5": {
+      "uuid": "069a79f4-44e9-4726-a5be-fca90e38aaf5",
+      "name": "Notch",
+      "joinCount": 0,
+      "onlineSeconds": 1830,
+      "firstJoin": "00:00:00",
+      "carriedOverFrom": "2026-10-02",
+      "lastSeen": "00:30:00",
+      "lastIp": "203.0.113.7",
+      "ips": [
+        {
+          "ip": "203.0.113.7",
+          "joinCount": 1,
+          "firstSeen": "00:00:00",
+          "lastSeen": "00:00:00"
+        }
+      ]
+    }
+  }
+}
+```
+
+`carriedOverFrom` 说明该玩家 10-02 就已在线并一直没掉线，因此 10-03 的时长是从 00:00:00 起延续累计的，
+当天并没有发生新的上线事件（`joinCount` 为 0，首登为 `00:00:00`）。指令里会显示为「自 2026-10-02 延续在线」。
 
 ## 从源码构建
 
@@ -103,7 +135,7 @@
 ./gradlew build
 ```
 
-产物在 `build/libs/player-activity-1.1.0.jar`（另附 `-sources.jar` 源码包）。
+产物在 `build/libs/player-activity-1.1.1.jar`（另附 `-sources.jar` 源码包）。
 
 > 网络说明：`gradle/wrapper/gradle-wrapper.properties` 默认使用腾讯云镜像下载 Gradle 9.7.1（国内网络 `services.gradle.org` 常无法直连）。如果你的网络可以访问官方源，可将其改回：
 > `distributionUrl=https\://services.gradle.org/distributions/gradle-9.7.1-bin.zip`
@@ -131,6 +163,7 @@ player-activity-mod/
 - **IP 记录的两个前提**：① 只有真实网络连接才有 IP，单人存档/局域网内置服务端（本地地址）会记录为「未取得连接 IP」；② 若服务端前面挂着 BungeeCord / Velocity 等代理且未启用 HAProxy 协议转发，`getRemoteAddress()` 拿到的是**代理的地址**而不是玩家真实地址，这与绝大多数 Fabric 模组的取法一致；
 - 同一 IP 背后可能有多个玩家（例如同一家庭/校园网出口），所以 `/pactivity whois` 只说明「这个 IP 近期有谁用」，不能当作身份证明；
 - 数据文件里的 IP 时间用当日 `HH:mm:ss`，而 `/pactivity ip`、`/pactivity whois` 汇总时会自动补上日期，显示为 `yyyy-MM-dd HH:mm:ss`；
+- **跨零点延续条目**：玩家一直在线跨过零点时，新一天会生成一条延续记录（`carriedOverFrom` 非空、首登 `00:00:00`、`joinCount` 为 0），时长从 00:00:00 起累计。该条目若当天又掉线重连，`onJoin` 会正常累加上线次数与 IP（延续条目本身不虚增）；
 - 兼容版本声明为 `~26.1`（即 26.1 / 26.1.1 / 26.1.2）。若日后升级到 26.2+，需将 `gradle.properties` 中 `fabric_api_version` 换成对应版本，并把 `fabric.mod.json` 的 `minecraft` 依赖放宽（如 `">=26.1 <27"`）后重新构建；
 - 本模组不需要 Mixin，仅使用 Fabric API 稳定事件，升级成本很低。
 

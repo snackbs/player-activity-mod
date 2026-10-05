@@ -39,8 +39,17 @@ public class DailyRecord {
         /** 当日累计在线秒数 */
         public long onlineSeconds = 0;
 
-        /** 当日首次上线时间（HH:mm:ss） */
+        /** 当日首次上线时间（HH:mm:ss）；跨零点延续在线时为 00:00:00 */
         public String firstJoin;
+
+        /**
+         * 跨零点延续标记：该玩家在当日 00:00:00 之前就已在线（一直未掉线），
+         * 值为其开始延续的日期（yyyy-MM-dd），即上一份记录文件所属日期。
+         *
+         * <p>为 null 表示这不是延续条目，玩家当天确实有过一次上线事件。
+         * 旧数据没有该字段，读取时按 null（非延续）处理。
+         */
+        public String carriedOverFrom;
 
         /** 当日最后在线时间（HH:mm:ss） */
         public String lastSeen;

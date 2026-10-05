@@ -133,7 +133,9 @@ public final class ActivityCommands {
         MutableComponent text = Component.literal("你今天已在线 ").withStyle(ChatFormatting.AQUA)
                 .append(Component.literal(ActivityManager.formatDuration(entry.onlineSeconds)).withStyle(ChatFormatting.GREEN))
                 .append(Component.literal("（上线 " + entry.joinCount + " 次"
-                        + (entry.firstJoin != null ? "，首次上线 " + entry.firstJoin : "") + "）").withStyle(ChatFormatting.GRAY));
+                        + (entry.firstJoin != null ? "，首次上线 " + entry.firstJoin : "")
+                        + (entry.carriedOverFrom != null ? "，自 " + entry.carriedOverFrom + " 延续在线" : "")
+                        + "）").withStyle(ChatFormatting.GRAY));
         source.sendSuccess(() -> text, false);
         return 1;
     }
@@ -189,6 +191,7 @@ public final class ActivityCommands {
             if (entry.lastSeen != null) {
                 detail.append("｜最后 ").append(entry.lastSeen);
             }
+            detail.append(carryOverNote(entry));
             detail.append(ipSummary(entry));
             detail.append("）").append(marker);
             MutableComponent text = Component.literal(name).withStyle(ChatFormatting.YELLOW)
@@ -228,7 +231,8 @@ public final class ActivityCommands {
             PlayerEntry entry = stat.entry();
             MutableComponent text = Component.literal(stat.date() + "：").withStyle(ChatFormatting.WHITE)
                     .append(Component.literal(ActivityManager.formatDuration(entry.onlineSeconds)).withStyle(ChatFormatting.GREEN))
-                    .append(Component.literal("（上线 " + entry.joinCount + " 次" + ipSummary(entry) + "）").withStyle(ChatFormatting.GRAY));
+                    .append(Component.literal("（上线 " + entry.joinCount + " 次" + carryOverNote(entry)
+                            + ipSummary(entry) + "）").withStyle(ChatFormatting.GRAY));
             source.sendSuccess(() -> text, false);
         }
         return 1;
@@ -293,6 +297,17 @@ public final class ActivityCommands {
         }
         int count = ActivityManager.ipCount(entry);
         return "｜IP " + entry.lastIp + (count > 1 ? "（当日 " + count + " 个）" : "");
+    }
+
+    /**
+     * 跨零点延续标记：玩家在当日 00:00:00 前就已在线、当天没有新的上线事件时返回说明文字，
+     * 否则返回空串。旧数据没有该字段，按非延续处理。
+     */
+    private static String carryOverNote(PlayerEntry entry) {
+        if (entry == null || entry.carriedOverFrom == null) {
+            return "";
+        }
+        return "｜自 " + entry.carriedOverFrom + " 延续在线";
     }
 
     /** 把「首次～最后」时间戳拼成一段简短说明。 */

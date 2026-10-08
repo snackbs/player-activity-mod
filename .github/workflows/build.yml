@@ -61,6 +61,8 @@ jobs:
         with:
           files: build/libs/*.jar
           # 更新日志正文来自 RELEASE_NOTES.md；generate_release_notes 作为兜底追加变更列表
+          # 注意：body_path 会把该文件**整篇**当作正文，所以发布前要用新版本小节整体替换它，
+          # 不要把新小节追加在旧内容前面（否则旧版本的更新日志会一起出现在发布页上）
           body_path: RELEASE_NOTES.md
           generate_release_notes: true
           # 同名 Release 已存在时更新它（例如补正更新日志后重新推送同一个标签）

@@ -10,8 +10,11 @@ import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.Permissions;
 
@@ -332,9 +335,16 @@ public final class ActivityCommands {
         source.sendSuccess(() -> Component.literal("共 " + dates.size() + " 天有记录，最近 " + shown + " 天：").withStyle(ChatFormatting.AQUA), false);
         for (String date : dates.subList(0, shown)) {
             int count = ActivityManager.queryRecord(date).map(record -> record.players.size()).orElse(0);
+            // 「x 名玩家」可点击：直接在聊天栏里执行 /pactivity date <日期>，跳到该天的在线记录
+            Style clickable = Style.EMPTY
+                    .withColor(ChatFormatting.GREEN)
+                    .withClickEvent(new ClickEvent.RunCommand("/pactivity date " + date))
+                    .withHoverEvent(new HoverEvent.ShowText(
+                            Component.literal("点击查看 " + date + " 的玩家在线记录").withStyle(ChatFormatting.YELLOW)));
             source.sendSuccess(() -> Component.literal(date + "：").withStyle(ChatFormatting.WHITE)
-                    .append(Component.literal(count + " 名玩家").withStyle(ChatFormatting.GREEN)), false);
+                    .append(Component.literal(count + " 名玩家").withStyle(clickable)), false);
         }
+        source.sendSuccess(() -> Component.literal("提示：点击日期后面的「x 名玩家」即可查看当天的在线记录").withStyle(ChatFormatting.DARK_GRAY), false);
         return 1;
     }
 

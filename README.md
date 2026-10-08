@@ -23,6 +23,7 @@
 - 隐私提示：IP 属于个人信息，数据文件保存在服务端本地，请自行确认是否告知玩家并注意文件访问权限（指令查看 IP 均需 OP）
 - 纯服务端逻辑，**客户端无需安装**本模组（也支持单人/局域网联机的内置服务端）
 - 性能开销极低：按**真实时间（墙钟）**节流累计，无玩家在线时零额外开销；日期列表带短缓存，指令补全不反复扫盘；无数据库、无外部依赖
+- **点击即查某天记录**：`/pactivity list` 中每一天后面的「x 名玩家」是一段可点击文本（悬停会显示提示），点一下就等于执行 `/pactivity date <该日期>`，无需手动输入日期；纯服务端下发，原版客户端即可识别
 
 ## 游戏内指令
 
@@ -35,8 +36,11 @@
 | `/pactivity player <玩家名> [天数]` | OP | 查看某玩家最近 N 天（默认 14，最大 365）的每日在线情况，也支持填 UUID |
 | `/pactivity ip <玩家名> [天数]` | OP | 查看某玩家最近 N 天（默认 30，最大 3650）用过的 IP，按上线次数排序（最多显示 10 条） |
 | `/pactivity whois <ip> [天数]` | OP | 反查某 IP 最近 N 天（默认 30）有哪些玩家用过，并显示各人的上线次数与首末时间 |
-| `/pactivity list` | OP | 列出所有有记录的日期及当天上线人数 |
+| `/pactivity list` | OP | 列出所有有记录的日期及当天上线人数；点击某天的「x 名玩家」即可直接查看该天的在线记录 |
 | `/pactivity me` | 所有玩家 | 查看自己今天的在线时长 |
+
+> 提示：`/pactivity list` 里每一天后面的「x 名玩家」都可以点击——鼠标悬停会显示「点击查看 yyyy-MM-dd 的玩家在线记录」，
+> 点一下就等于执行 `/pactivity date <该日期>`，直接跳到那一天的在线记录。
 
 示例：
 
@@ -55,7 +59,7 @@
 1. 服务端为 **Minecraft 26.1 + Fabric Loader 0.19.3+**（`fabric.mod.json` 声明 `>=0.19.3`，更高版本如 0.19.4/0.19.5 同样兼容；26.1 要求 **Java 25** 运行环境）；
 2. `mods` 文件夹内放入：
    - `fabric-api-0.155.3+26.1.2.jar`（Fabric API，26.1/26.1.1/26.1.2 通用）
-   - `player-activity-1.1.1.jar`（本模组，见 `build/libs/` 或随附构建产物）
+   - `player-activity-1.1.2.jar`（本模组，见 `build/libs/` 或随附构建产物）
 3. 重启服务器。首次有玩家上线后，服务端根目录会出现 `player-activity` 文件夹。
 
 ## 数据文件示例
@@ -135,7 +139,7 @@
 ./gradlew build
 ```
 
-产物在 `build/libs/player-activity-1.1.1.jar`（另附 `-sources.jar` 源码包）。
+产物在 `build/libs/player-activity-1.1.2.jar`（另附 `-sources.jar` 源码包）。
 
 > 网络说明：`gradle/wrapper/gradle-wrapper.properties` 默认使用腾讯云镜像下载 Gradle 9.7.1（国内网络 `services.gradle.org` 常无法直连）。如果你的网络可以访问官方源，可将其改回：
 > `distributionUrl=https\://services.gradle.org/distributions/gradle-9.7.1-bin.zip`
@@ -153,6 +157,10 @@ player-activity-mod/
 │   └── DailyRecord.java          # 每日记录数据结构（Gson 序列化）
 └── src/main/resources/fabric.mod.json
 ```
+
+## 更新日志
+
+各版本改动见 [`RELEASE_NOTES.md`](RELEASE_NOTES.md)，已发布版本见 [GitHub Releases](https://github.com/snackbs/player-activity-mod/releases)。
 
 ## 注意事项
 

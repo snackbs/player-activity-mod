@@ -160,7 +160,7 @@ player-activity-mod/
 
 ## 更新日志
 
-各版本改动见 [`RELEASE_NOTES.md`](RELEASE_NOTES.md)，已发布版本见 [GitHub Releases](https://github.com/snackbs/player-activity-mod/releases)。
+最新版本的改动见 [`RELEASE_NOTES.md`](RELEASE_NOTES.md)，历史版本见 [GitHub Releases](https://github.com/snackbs/player-activity-mod/releases)。
 
 ## 注意事项
 

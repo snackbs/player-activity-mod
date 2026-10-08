@@ -63,3 +63,5 @@ jobs:
           # 更新日志正文来自 RELEASE_NOTES.md；generate_release_notes 作为兜底追加变更列表
           body_path: RELEASE_NOTES.md
           generate_release_notes: true
+          # 同名 Release 已存在时更新它（例如补正更新日志后重新推送同一个标签）
+          allowUpdates: true
